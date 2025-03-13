@@ -11,7 +11,7 @@
 # 
 # programas a correr
 PROG_ALUNOS="./ortografia"
-VALGRIND="time valgrind --leak-check=full --show-leak-kinds=all "
+VALGRIND="valgrind --leak-check=full --show-leak-kinds=all "
 DIFF="diff --text"
 # opções para o time
 export TIME="real %E\tuser %U\tsys %S\texit status %x\t%I inputs + %O outputs"
@@ -40,13 +40,13 @@ for file in T*; do
   cd $file
   if ( [ $MODE == 1 ] ); then
     # modo 1, stdin e stdout
-    $VALGRIND ../$PROG_ALUNOS < $INPUT > ${OUTPUT}$MODE.txt
+    time $VALGRIND ../$PROG_ALUNOS < $INPUT > ${OUTPUT}$MODE.txt
   else
     if ( [ $file == T09 ] ); then
       # T09 no modo 2 e 3 tem parâmetros na linha de comando
-      $VALGRIND ../$PROG_ALUNOS -m $MODE -n 3 -a 30 -i $INPUT -o ${OUTPUT}$MODE.txt
+      time $VALGRIND ../$PROG_ALUNOS -m $MODE -n 3 -a 30 -i $INPUT -o ${OUTPUT}$MODE.txt
     else
-      $VALGRIND ../$PROG_ALUNOS -m $MODE -i $INPUT -o ${OUTPUT}$MODE.txt
+      time $VALGRIND ../$PROG_ALUNOS -m $MODE -i $INPUT -o ${OUTPUT}$MODE.txt
     fi
   fi
   # Comparar os ficheiros
@@ -56,7 +56,7 @@ for file in T*; do
   else
     echo $file ERRO
     let erros++
-    if [ $erros -gt 5 ]; then
+    if [ $erros -gt 10 ]; then
       echo Demasiados erros, terminando.
       exit
     fi
