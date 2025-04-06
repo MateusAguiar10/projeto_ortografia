@@ -1,184 +1,384 @@
-#define DICT_PATH "words"
-
-#include <stdio.h>
+/*-----------------------------------------------------------------------------------------------------+
+| ortografia.c           | Funções de carregamento do dicionário para um vetor                         |
+|                        | Função de processamento de um vetor de linhas com suporte a diferentes modos|
+|                        | de funcionamento                                                            |
+|                        | Função que retorna a primeira sugestão com base no algoritmo de sugestoes   |
++------------------------------------------------------------------------------------------------------+
+| Autores: José Mateus Aguiar n. 113754         Rogério Pina n. 114719                                 |
+|          LEEC-IST                                                                                    |
+| Data: 06 Abril 2025                                                                                  |
++-----------------------------------------------------------------------------------------------------*/
+#include "ortografia.h"
+#include "processos_diferencas.h"
 #include <stdlib.h>
 #include <string.h>
-#include <getopt.h>
 #include <ctype.h>
+#include <stdio.h>
 
-// vi isto no stack overflow
-int compare_strings(const void *a, const void *b) {
-    const char *str1 = *(const char **)a;
-    const char *str2 = *(const char **)b;
+/*Nome: carrega_dicionario
+  Input: filename: nome do arquivo de dicionário
+         words_len: ponteiro para inteiro que VAI guardar o número de palavras
+  Output: ponteiro para um array de strings (cada palavra do dicionário)
+  Description: Carrega o dicionário a partir do arquivo fornecido.
+               - O número de palavras é retornado através do ponteiro words_len.
+                - Aloca memória para o array de palavras e lê cada linha do arquivo,
+                armazenando as palavras no array.
+                - Se o arquivo não puder ser aberto, imprime uma mensagem de erro e sai do programa.
+                - Se a alocação de memória falhar, imprime uma mensagem de erro e sai do programa.
+*/
+char ** carrega_dicionario(char * filename, int * words_len) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        fprintf(stderr, "Erro ao abrir o arquivo de dicionário: %s\n", filename);
+        exit(1);
+    }
+
+    int count = 0;
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read;
+
+    // primeiro loop para contar o número de palavras
+    while ((read = getline(&line, &len, file)) != -1) {
+        count++;
+    }
+    // Libertar a linha alocada pelo getline após o primeiro loop
+    free(line);
+    line = NULL;
+    len = 0;
+    rewind(file);
+
+    // aloca memória para o array de palavras
+    char ** words = malloc(count * sizeof(char*));
+    if (words == NULL) { 
+        fprintf(stderr, "Erro ao alocar memória para words\n");
+        exit(1);
+    }
+    int i = 0;
+
+    // segundo loop para ler as palavras e armazená-las
+    while ((read = getline(&line, &len, file)) != -1) {
+        // Remove o '\n' do final se presente
+        if (read > 0 && line[read - 1] == '\n') {
+            line[read - 1] = '\0';
+            read--;
+        }
+        
+        words[i] = malloc(read + 1);
+        if (words[i] == NULL) {
+            fprintf(stderr, "Erro ao alocar memória para palavra\n");
+            exit(1);
+        }
+        strcpy(words[i], line);
+        i++;
+    }
     
-    return strcasecmp(str1, str2);
+    // Liberar a linha alocada pelo getline após o segundo loop
+    free(line);
+    fclose(file);
+
+    *words_len = count; 
+    return words;
 }
 
-// Compara letra a letra (do início) sem saltos ("offset") e conta as diferenças.
-int diferencas_normais(const char *w1, const char *w2) {
-    int diff = 0;
-    int i = 0, j = 0;
-    int len1 = strlen(w1), len2 = strlen(w2);
-    while(i < len1 && j < len2) {
-        if(tolower(w1[i]) == tolower(w2[j])) {
-            i++; j++;
-        } else {
-            diff++;
-            i++; j++;
-        }
-    }
-    // Se uma palavra acabar antes, cada caractere extra conta como diferença.
-    diff += (len1 - i) + (len2 - j);
-    return diff;
-}
+/*Nome: processa_linhas
+  Input: lines: array de strings (linhas a processar)
+         nr_linhas: número de linhas a processar (tamanho de lines)
+         dictionary: array de strings (dicionário)
+         dict_size: número de palavras no dicionário
+         output: ponteiro para o arquivo de saída (para a flag -o)
+         mode: modo de operação (1, 2 ou 3)
+         max_diff: número máximo de diferenças permitidas (para a flag -n)
+         max_suggestions: número máximo de sugestões a imprimir (para a flag -a)
 
+  Output: Não retorna nada, mas imprime os erros e sugestões no arquivo de saída. 
+  Description: 
+               - Processa cada linha do array lines, verificando cada palavra dessa linha contra o dicionário. (bsearch)
+               - Se a palavra não estiver no dicionário, imprime um erro e, se o modo for 2,
+                 imprime sugestões de correção.
+               - O modo 1 verifica apenas erros, o modo 2 verifica erros e sugere correções,
+                 e o modo 3 corrige automaticamente as palavras.
+               - O número máximo de diferenças permitidas e o número máximo de sugestões
+                 são controlados pelos parâmetros max_diff e max_suggestions, respetivamente.
+*/
+void processa_linhas(char ** lines, int nr_linhas, char ** dictionary, int dict_size, FILE *output, int mode, int max_diff, int max_suggestions) {
+    char * delimitadores = " #*$\t\n/.,;:!?\"-()[]{}\\|<>~`@^&%+=_";
 
-// Compara do início, mas ao encontrar a primeira diferença, 
-// salta um número de caracteres (offset) na palavra do dicionário se a palavra errada for menor,
-// ou na palavra errada se ela for maior. Se forem do mesmo tamanho, salta em ambas.
-int diferencas_offset(const char *w1, const char *w2, int target) {
-    int diff = 0;
-    int i = 0, j = 0;
-    int len1 = strlen(w1), len2 = strlen(w2);
-    while(i < len1 && j < len2) {
-        if(tolower(w1[i]) == tolower(w2[j])) {
-            i++; j++;
-        } else {
-            diff += target;
-            if(diff > target)
-                return diff;
-            if(len1 < len2) {
-                j += target; // salta na palavra do dicionário
-            } else if(len1 > len2) {
-                i += target; // salta na palavra errada
-            } else {
-                i += target;
-                j += target;
-            }
-        }
-    }
-    diff += (len1 - i) + (len2 - j);
-    return diff;
-}
-
-// Compara as palavras de trás para a frente, contando as diferenças.
-int diferencas_para_tras(const char *w1, const char *w2) {
-    int diff = 0;
-    int len1 = strlen(w1), len2 = strlen(w2);
-    int i = len1 - 1, j = len2 - 1;
-    while(i >= 0 && j >= 0) {
-        if(tolower(w1[i]) == tolower(w2[j])) {
-            i--; j--;
-        } else {
-            diff++;
-            i--; j--;
-        }
-    }
-    diff += (i + 1) + (j + 1);
-    return diff;
-}
-
-// Calcula a menor diferença encontrada pelos métodos acima.
-int minimo_diferencas_diferentes_processos(const char *w1, const char *w2, int target) {
-	// Calcula as diferenças normais, offset e para trás.
-    int d1 = diferencas_normais(w1, w2);
-    int d2 = diferencas_offset(w1, w2, target);
-    int d4 = diferencas_para_tras(w1, w2);
-    int m = d1;
-    if(d2 < m) m = d2;
-    if(d4 < m) m = d4;
-
-    return m;
-}
-
-char * diferenca_com_palavra_dicionario(char *w1, char *w2, char **dicionario, size_t size_dicionario) {
-	int len2 = strlen(w2);
-    int j;
-	for (j = 0; j < len2; j++) {
-        if (tolower(w1[j]) != tolower(w2[j])) {
-            break;
-        }
-    }
-
-    if (j != len2) {
-        return NULL;
-    }
-
-	char * nova_palavra = w1 + j;
-
-	void * res = bsearch(&nova_palavra, dicionario, size_dicionario, sizeof(char*), compare_strings);
-	if (res != NULL) {
-		return nova_palavra;
-	}
-
-	return NULL;
-}
-
-void testar_linhas(char ** linhas, int nr_linhas, char ** dicionario, size_t size_dicionario, FILE *output, int modo, int modo2_difs, int modo2_max) {
-    // este caracter feff aparece num texto qualquer de um teste, 'e um caracter invisivel que nao tem nenhuma razao para exisitr
-    char * delimitadores = " \t\n/.,;:!?\"-()[]{}﻿";
     int primeira = 1;
     for (int i = 0; i < nr_linhas; i++) {
-        char * linha = strdup(linhas[i]);
-        // para nao estragar a linha original tenho de duplicar a linha
-        char * pch = strtok(linha, delimitadores);
-        // o strtok divide a linha pelos separadores que definimos dentro das aspas
-        while (pch != NULL) {
+        char * linha = strdup(lines[i]); /* Copia a linha para nao estragar a original */
+        if (linha == NULL) {
+            fprintf(stderr, "Erro ao alocar memória para linha\n");
+            exit(1);
+        }
 
-            // se a palavra tiver aspas no inicio e no fim, remove as aspas, só pq algumas palavras tem um apostrofo no meio e nao quero dividi-las
+        if (mode == 3) {
+            char *linha_corrigida = NULL;
+            size_t size_linha_corrigida = 0;
+            /* Inicializa a linha corrigida */
+            linha_corrigida = malloc(1);
+            if (linha_corrigida == NULL) { 
+                fprintf(stderr, "Erro ao alocar memória\n"); 
+                exit(1); 
+            }
+            linha_corrigida[0] = '\0';
+            size_linha_corrigida = 0;
+            
+            char *ptr = linha;
+            while (*ptr != '\0') {
+                /* Se o caractere atual for um delimitador, copia-o para a saída */
+                if (strchr(delimitadores, *ptr) != NULL) {
+                    { 
+                        char *temp = realloc(linha_corrigida, size_linha_corrigida + 2);
+                        if (temp == NULL) {
+                            fprintf(stderr, "Erro ao realocar memória\n");
+                            exit(1);
+                        }
+                        linha_corrigida = temp;
+                    }
+                    linha_corrigida[size_linha_corrigida] = *ptr;
+                    size_linha_corrigida++;
+                    linha_corrigida[size_linha_corrigida] = '\0';
+                    ptr++;
+                } else {
+                    // Extrai o token (palavra)
+                    size_t token_len = strcspn(ptr, delimitadores);
+                    char *token = malloc(token_len + 1);
+                    if (token == NULL) {
+                        fprintf(stderr, "Erro ao alocar memória para token\n");
+                        exit(1);
+                    }
+                    strncpy(token, ptr, token_len);
+                    token[token_len] = '\0';
 
-            size_t len = strlen(pch);
+                    /*Para lidar com apostrofos no inicio e no final é preciso esta logica toda para nao cortar palavras como can't ao meio*/
+                    int count_apostrofo_inicio = 0;
+                    while (count_apostrofo_inicio < token_len && token[count_apostrofo_inicio] == '\'') {
+                        count_apostrofo_inicio++;
+                    }
 
-            if (len > 0 && pch[0] == '\'') {
-                pch++;
-                len--;
+                    int count_apostrofo_final = 0;
+                    while (count_apostrofo_final < token_len && token[token_len - 1 - count_apostrofo_final] == '\'') {
+                        count_apostrofo_final++;
+                    }
+
+                    if (count_apostrofo_inicio == token_len) {
+                        char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
+                        if (temp == NULL) {
+                            fprintf(stderr, "Erro ao realocar memória\n");
+                            exit(1);
+                        }
+                        linha_corrigida = temp;
+                        strncat(linha_corrigida, token, token_len);
+                        size_linha_corrigida += token_len;
+                        free(token);
+                        ptr += token_len;
+                        continue;
+                    }
+
+                    // Cria uma palavra sem os apóstrofos para a pesquisa
+                    size_t new_length = token_len - count_apostrofo_inicio - count_apostrofo_final;
+                    char *clean_token = malloc(new_length + 1);
+                    if (clean_token == NULL) {
+                        fprintf(stderr, "Erro ao alocar memória para clean_token\n");
+                        exit(1);
+                    }
+                    if (new_length > 0) {
+                        strncpy(clean_token, token + count_apostrofo_inicio, new_length);
+                    }
+                    clean_token[new_length] = '\0';
+
+
+                    if (somente_numero(clean_token)) {
+                        /* Se for um numero apenas adiciona o numero */
+                        { 
+                            char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
+                            if (temp == NULL) {
+                                fprintf(stderr, "Erro ao realocar memória\n");
+                                exit(1);
+                            }
+                            linha_corrigida = temp;
+                        }
+                        strncat(linha_corrigida, token, token_len);
+                        size_linha_corrigida += token_len;
+                    } else {
+                        void *res = bsearch(&clean_token, dictionary, dict_size, sizeof(char*), comparacao_helper);
+                        if (res == NULL) {
+                            char *sugestao = primeira_sugestao(clean_token, dictionary, dict_size, max_diff);
+                            if (sugestao != NULL) {
+                                for (int k = 0; k < count_apostrofo_inicio; k++) { //adiciona os apostrofos no final
+                                    char *temp = realloc(linha_corrigida, size_linha_corrigida + 2);
+                                    if (temp == NULL) {
+                                        fprintf(stderr, "Erro ao realocar memória\n");
+                                        exit(1);
+                                    }
+                                    linha_corrigida = temp;
+                                    linha_corrigida[size_linha_corrigida] = '\'';
+                                    size_linha_corrigida++;
+                                    linha_corrigida[size_linha_corrigida] = '\0';
+                                }
+                                size_t sug_len = strlen(sugestao);
+                                { 
+                                    char *temp = realloc(linha_corrigida, size_linha_corrigida + sug_len + 1);
+                                    if (temp == NULL) {
+                                        fprintf(stderr, "Erro ao realocar memória\n");
+                                        exit(1);
+                                    }
+                                    linha_corrigida = temp;
+                                }
+                                strcat(linha_corrigida, sugestao); /* adiciona a palavra entre os apostrofos */
+                                size_linha_corrigida += sug_len;
+                                for (int k = 0; k < count_apostrofo_final; k++) {
+                                    char *temp = realloc(linha_corrigida, size_linha_corrigida + 2);
+                                    if (temp == NULL) {
+                                        fprintf(stderr, "Erro ao realocar memória\n");
+                                        exit(1);
+                                    }
+                                    linha_corrigida = temp;
+                                    linha_corrigida[size_linha_corrigida] = '\'';
+                                    size_linha_corrigida++;
+                                    linha_corrigida[size_linha_corrigida] = '\0';
+                                }
+                                free(sugestao);
+                            } else {
+                                /* se nao for encontrada uma sugestao no dicionario vai a original */
+                                { 
+                                    char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
+                                    if (temp == NULL) {
+                                        fprintf(stderr, "Erro ao realocar memória\n");
+                                        exit(1);
+                                    }
+                                    linha_corrigida = temp;
+                                }
+                                strncat(linha_corrigida, token, token_len);
+                                size_linha_corrigida += token_len;
+                            }
+                        } else {
+                            /* se a palavra estiver certa (no dicionario) vai a original, que ja ha de ter os apostrofos todos por isso nao é preciso lidar com isso */
+                            { 
+                                char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
+                                if (temp == NULL) {
+                                    fprintf(stderr, "Erro ao realocar memória\n");
+                                    exit(1);
+                                }
+                                linha_corrigida = temp;
+                            }
+                            strncat(linha_corrigida, token, token_len);
+                            size_linha_corrigida += token_len;
+                        }
+                    }
+                    free(token);
+                    free(clean_token);
+                    ptr += token_len;
+                }
+            }
+            fprintf(output, "%s\n", linha_corrigida);
+            free(linha_corrigida);
+            free(linha);
+            continue;
+        }
+
+        char * pch = strtok(linha, delimitadores); /* Divide a linha pelos delimitadores definidos */
+        while (pch != NULL) { 
+            char *temp = strdup(pch); /*copia temporaria da palavra para dar handle aos apostrofos */
+            if (temp == NULL) {
+                fprintf(stderr, "Erro ao alocar memória para temp\n");
+                exit(1);
+            }
+            size_t temp_len = strlen(temp);
+
+
+            /* Remove apóstrofos no início e no fim, se houver. Nao podemos cortar palavras com apostrofo ao meio, por isso a lógica extra */
+            int count_apostrofo_inicio = 0;
+            while (count_apostrofo_inicio < temp_len && temp[count_apostrofo_inicio] == '\'') {
+                count_apostrofo_inicio++;
             }
 
-            if (len > 0 && pch[len - 1] == '\'') {
-                pch[len - 1] = '\0';
+            int count_apostrofo_final = 0;
+            while (count_apostrofo_final < temp_len && temp[temp_len - 1 - count_apostrofo_final] == '\'') {
+                count_apostrofo_final++;
             }
 
-            if (pch[0] == '\0') {
+            /*se for so apostrofos, ignora a palavra*/
+            if (count_apostrofo_inicio == temp_len) {
+                free(temp);
                 pch = strtok(NULL, delimitadores);
                 continue;
             }
 
-            //tive de adicionar logica para lidar com numeros, caso o atoi seja 0. Ainda há o caso de haver uma palavra com multiplos 000000 mas vou ignorar isso porque nao é relevante
-            if (pch[0] == '0' || atoi(pch) != 0) {
+            /* como no modo 3 é criado um token sem apostrofos para a pesquisa */
+            char *clean_token = NULL;
+            size_t new_length = temp_len - count_apostrofo_inicio - count_apostrofo_final;
+            clean_token = malloc(new_length + 1);
+            if (clean_token == NULL) {
+                fprintf(stderr, "Erro ao alocar memória para clean_token\n");
+                exit(1);
+            }
+            if (new_length > 0) {
+                strncpy(clean_token, temp + count_apostrofo_inicio, new_length);
+            }
+            clean_token[new_length] = '\0';
+            
+            free(temp);
+        
+            /* Se, após a limpeza, o token está vazio, ignora-o */
+            if (clean_token[0] == '\0') {
+                free(clean_token);
                 pch = strtok(NULL, delimitadores);
                 continue;
-            } 
+            }
 
-            // o bsearch procura a palavra no dicionario
-            void * res = bsearch(&pch, dicionario, size_dicionario, sizeof(char*), compare_strings);
 
+            if (clean_token[0] == '\0') {
+                free(clean_token);
+                pch = strtok(NULL, delimitadores);
+                continue;
+            }
+
+            /* Ignora números */
+            if (somente_numero(clean_token)) {
+                free(clean_token);
+                pch = strtok(NULL, delimitadores);
+                continue;
+            }
+
+            /* Verifica se a palavra está no dicionário */
+            void * res = bsearch(&clean_token, dictionary, dict_size, sizeof(char*), comparacao_helper);
             if (res == NULL) {
-                if (primeira == 1) {
-                    fprintf(output, "%d: %s\n", i+1, linhas[i]);
+                if (primeira == 1) { /* Isto serve para a dar print a linha onde se encontra a palavra somente na primeira palavra errada da linha */
+                    fprintf(output, "%d: %s\n", i+1, lines[i]);
                     primeira = 0;
                 }
-                fprintf(output, "Erro na palavra \"%s\"\n", pch);
+                fprintf(output, "Erro na palavra \"%s\"\n", clean_token);
 
                 int sugestao = 0;
-                if (modo == 2) {
-                    int difs = modo2_difs;
+                if (mode == 2) { /* Modo 2: Sugestoes. O parametro que decide se este modo esta ativo é passado nos paramentros da funcao */
+                    int difs = max_diff;
                     int count_sugestoes = 0;
-                    char * suggested[modo2_max]; // array para armazenar sugestões já exibidas
-                    int suggested_count = 0;
-                    for (int j = 1; j <= difs && count_sugestoes < modo2_max; j++) {
-                        for (int k = 0; k < size_dicionario && count_sugestoes < modo2_max; k++) {
-                            char * segunda_palavra = diferenca_com_palavra_dicionario(pch, dicionario[k], dicionario, size_dicionario);
-                            if (j == 1 && segunda_palavra != NULL) {
-                                // concatena a palavra do dicionario com o resto da palavra
-                                char * nova_palavra = malloc(strlen(dicionario[k]) + strlen(segunda_palavra) + 2);
-                                strcpy(nova_palavra, dicionario[k]);
-                                strcat(nova_palavra, " ");
-                                strcat(nova_palavra, segunda_palavra);
 
-                                // Verifica se a palavra já foi sugerida
+                    char **suggested = malloc(max_suggestions * sizeof(char*)); /* Array para guardar sugestoes, para nao se repetir */
+                    if (!suggested) {
+                        fprintf(stderr, "Erro ao alocar memória para sugestoes\n");
+                        exit(1);
+                    } 
+                    
+                    int suggested_count = 0;
+                    for (int j = 1; j <= difs && count_sugestoes < max_suggestions; j++) {
+                        for (int k = 0; k < dict_size && count_sugestoes < max_suggestions; k++) {
+                            char * segunda_palavra = diferenca_com_segunda_palavra(clean_token, dictionary[k], dictionary, dict_size);
+                            if (j == 1 && segunda_palavra != NULL) {    /* Primeiro é feito o check de se o erro está em ter faltado algum espaço, isto é ao divir a palavra no primeiro e obtermos duas palavras que constam no dicionario, um erro pode ser um espaço que faltou */
+                                char * nova_palavra = malloc(strlen(dictionary[k]) + strlen(segunda_palavra) + 2);
+                                if (nova_palavra == NULL) {
+                                    fprintf(stderr, "Erro ao alocar memória para nova_palavra\n");
+                                    exit(1);
+                                }
+                                strcpy(nova_palavra, dictionary[k]);
+                                strcat(nova_palavra, " ");
+                                strcat(nova_palavra, segunda_palavra); /*É necessario criar uma nova string com as duas strings com um espaço no meio para dar print como a sugestao */
+
                                 int jaSugerida = 0;
                                 for (int s = 0; s < suggested_count; s++) {
-                                    if (strcasecmp(suggested[s], nova_palavra) == 0) {
+                                    if (strcasecmp(suggested[s], nova_palavra) == 0) {  /* Verifica se a sugestao ja foi dada */
                                         jaSugerida = 1;
                                         break;
                                     }
@@ -187,249 +387,96 @@ void testar_linhas(char ** linhas, int nr_linhas, char ** dicionario, size_t siz
                                     free(nova_palavra);
                                     continue;
                                 }
-
-                                // Registra a nova sugestão
                                 suggested[suggested_count++] = nova_palavra;
                                 if (sugestao == 0) {
-                                    fprintf(output, "%s", nova_palavra);
+                                    fprintf(output, "%s", nova_palavra);  /* Se for a primeira sugestao, imprime sem virgula */
                                     sugestao = 1;
                                 } else {
-                                    fprintf(output, ", %s", nova_palavra);
+                                    fprintf(output, ", %s", nova_palavra);  /* Se nao for a primeira sugestao, imprime com virgula */
                                 }
                                 count_sugestoes++;
-                                
                             }
-                            int dif = minimo_diferencas_diferentes_processos(pch, dicionario[k], j);
+                            int dif = minimo_diferencas(clean_token, dictionary[k], j); /* Verifica se a minimo numero de diferenças entre as duas palavras de acordo com cada um dos processos é igual ao número de diferenças permitidas */
                             if (dif == j) {
-                                // Verifica se a palavra já foi sugerida
                                 int jaSugerida = 0;
                                 for (int s = 0; s < suggested_count; s++) {
-                                    if (strcasecmp(suggested[s], dicionario[k]) == 0) {
+                                    if (strcasecmp(suggested[s], dictionary[k]) == 0) {
                                         jaSugerida = 1;
                                         break;
                                     }
                                 }
                                 if (jaSugerida)
                                     continue;
-                                // Registra a nova sugestão
-                                char * sugestao_str = strdup(dicionario[k]);
+
+                                char * sugestao_str = strdup(dictionary[k]);
                                 suggested[suggested_count++] = sugestao_str;
+                                if (sugestao_str == NULL) {
+                                    fprintf(stderr, "Erro ao alocar memória para sugestao_str\n");
+                                    exit(1);
+                                }
                                 if (sugestao == 0) {
-                                    fprintf(output, "%s", sugestao_str);
+                                    fprintf(output, "%s", sugestao_str); /* Se for a primeira sugestao, imprime sem virgula */
                                     sugestao = 1;
                                 } else {
-                                    fprintf(output, ", %s", sugestao_str);
+                                    fprintf(output, ", %s", sugestao_str); /* Se nao for a primeira sugestao, imprime com virgula */
                                 }
                                 count_sugestoes++;
-                                if (count_sugestoes >= modo2_max) {
+                                if (count_sugestoes >= max_suggestions) {
                                     break;
                                 }
                             }
                         }
                     }
-
-                    // Libera a memória alocada para as sugestões  
                     for (int s = 0; s < suggested_count; s++) {
                         free(suggested[s]);
                     }
-                    
+                    free(suggested);
                     fprintf(output, "\n");
-
-					
                 }
             }
-            
-            pch = strtok(NULL, delimitadores);
-    
+            free(clean_token);
+            pch = strtok(NULL, delimitadores); 
         }
         free(linha);
         primeira = 1;
     }
 }
 
-//decidimos adiantar esta parte
-char ** dicionario(char * filename, int * words_len) {
-    FILE *file = fopen(filename, "r");
-    if (file == NULL) {
-        printf("Erro ao abrir o arquivo\n");
-        exit(1);
-    }
-
-    // conta o nr de palavras
-    int count = 0;
-    char buffer[100];
-
-    while (fgets(buffer, sizeof(buffer), file)) {
-        count++;
-    }
-
-    // aloca o vetor de ponteiros para as palavras com a quantidade de palavras
-
-    rewind(file);
-
-    char ** words = malloc(count * sizeof(char*));
-
-    int i = 0;
-    while (fgets(buffer, sizeof(buffer), file)) {
-        // remove o \n do final da palavra
-        size_t len = strlen(buffer);
-        if (buffer[len - 1] == '\n') {
-            buffer[len - 1] = '\0';
-        }
-
-        // aloca a palavra e copia o buffer para a palavra
-        // desta forma cada palavra tem o espaco certo
-        words[i] = malloc(len + 1);
-        strcpy(words[i], buffer);
-        i++;
-    }
-    fclose(file);
-
-    *words_len = count;
-    return words;
-}
-
-int main(int argc, char ** argv) {
-    /* PARTE DO INPUT */
-    char ** lines = NULL;
-    char buffer[1000];
-    FILE *input = stdin; 
-    FILE *output = stdout;
-    int linhasalocadas = 0;
-    int count = 0;
-    
-    char *dict_path = DICT_PATH;
-    
-    // Variáveis para controlar o modo de sugestão
-    int modo = 0;         // Default: modo 1 (modo 2 = 2)
-    int modo2_max = 10;    // Default: 10 sugestões máximas 
-    int modo2_difs = 2;    // Default: diferença máxima de 2
-    
-    int opt;
-    while ((opt = getopt(argc, argv, "i:o:d:m:a:n:")) != -1) {
-        switch (opt) {
-            case 'i':
-                input = fopen(optarg, "r");
-                if (input == NULL) {
-                    printf("Erro ao abrir o arquivo de entrada: %s\n", optarg);
+/*Nome: primeira_sugestao
+  Input: palavra: palavra a verificar (uso suposto: uma palavra errada)
+         dicionario: array de strings (dicionário)
+         size_dicionario: número de palavras no dicionário
+         max_diferencas: número máximo de diferenças permitidas
+  Output: string com a primeira sugestão encontrada ou NULL se não houver sugestões
+  Description:
+        - Retorna a primeira sugestão encontrada no dicionário para a palavra fornecida
+        utilizando o mesmo algoritmo de sugestões que o modo 2 (ver processa_linhas).
+*/
+char * primeira_sugestao(char *palavra, char **dicionario, int size_dicionario, int max_diferencas) {
+    for (int j = 1; j <= max_diferencas; j++) {
+        for (int k = 0; k < size_dicionario; k++) {
+            // Tenta obter a sugestão combinada (possível falta de espaço)
+            char *segunda_palavra = diferenca_com_segunda_palavra(palavra, dicionario[k], dicionario, size_dicionario);
+            if (j == 1 && segunda_palavra != NULL) { 
+                int nova_palavra_len = strlen(dicionario[k]) + strlen(segunda_palavra) + 2;
+                char *nova_palavra = malloc(nova_palavra_len);
+                if (nova_palavra == NULL) {
+                    fprintf(stderr, "Erro ao alocar memória para nova_palavra\n");
                     exit(1);
                 }
-                break;
-            case 'o':
-                output = fopen(optarg, "w");
-                if (output == NULL) {
-                    printf("Erro ao abrir o arquivo de saída: %s\n", optarg);
-            
-                    if (input != stdin) {
-                        fclose(input);
-                    }
-                    
-                    exit(1);
-                }
-                break;
-            case 'd':
-                dict_path = optarg;
-                break;
-            case 'm':
-                modo = atoi(optarg);
-                if (modo < 1 || modo > 3) {
-                    printf("Modo inválido. Use 1 ou 2 ou 3.\n");
-                    
-                    if (input != stdin) {
-                        fclose(input);
-                    }
-                    if (output != stdout) {
-                        fclose(output);
-                    }
-                    
-                    exit(1);
-                }
-                break;
-            case 'a':
-                modo2_max = atoi(optarg);
-                break;
-            case 'n':
-                modo2_difs = atoi(optarg);
-                break;
-            default:
-                printf("Uso: %s [-i arquivo_entrada] [-o arquivo_saida] [-d dicionario] [-m modo] [-a max_sugestoes] [-n max_diferencas]\n", argv[0]);
+                strcpy(nova_palavra, dicionario[k]);
+                strcat(nova_palavra, " ");
+                strcat(nova_palavra, segunda_palavra);
                 
-                if (input != stdin) {
-                    fclose(input);
-                }
-                if (output != stdout) {
-                    fclose(output);
-                }
-                
-                exit(1);
+                return nova_palavra;
+            }
+            // Verifica se a diferença mínima é exatamente j
+            int dif = minimo_diferencas(palavra, dicionario[k], j);
+            if (dif == j) {
+                return strdup(dicionario[k]);
+            }
         }
     }
     
-    int words_len; 
-    char ** words = dicionario(dict_path, &words_len);
-    
-    qsort(words, words_len, sizeof(char*), compare_strings);	
-
-    // eu nem sei como fazer sem dyanmic memory allocation
-    while (fgets(buffer, sizeof(buffer), input) != NULL) {
-        size_t linha_len = strlen(buffer);	
-        if (linha_len > 0 && buffer[linha_len - 1] == '\n') {
-            buffer[linha_len - 1] = '\0';
-            linha_len--;
-        }
-
-        // aloca mais 10 linhas se precisar
-        if (count >= linhasalocadas) {
-            linhasalocadas += 10;
-            lines = realloc(lines, linhasalocadas * sizeof(char*));
-        }
-
-        // aloca a linha e copia o buffer para a linha
-        lines[count] = malloc(linha_len + 1);
-        if (lines[count] == NULL) {
-            printf("Erro ao alocar memoria\n");
-            for (int j = 0; j < count; j++) {
-                free(lines[j]);
-            }
-            free(lines);
-            
-            if (input != stdin) {
-                fclose(input);
-            }
-            
-            for (int j = 0; j < words_len; j++) {
-                free(words[j]);
-            }
-            free(words);
-            
-            exit(1);
-        }
-        strcpy(lines[count], buffer);
-        count++;
-    }
-    
-    if (input != stdin) {
-        fclose(input);
-    }
-
-
-    testar_linhas(lines, count, words, words_len, output, modo, modo2_difs, modo2_max);
-
-    if (output != stdout) {
-        fclose(output);
-    }
-
-    for (int j = 0; j < words_len; j++) {
-        free(words[j]);
-    }
-
-    free(words);
-  
-    for (int j = 0; j < count; j++) {
-        free(lines[j]);
-    }
-
-    free(lines);
-
-    return 0;
+    return NULL;
 }
