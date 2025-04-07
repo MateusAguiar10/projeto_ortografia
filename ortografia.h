@@ -60,4 +60,15 @@ void processa_linhas(char ** lines, int nr_linhas, char ** dictionary, int dict_
 */
 char * primeira_sugestao(char * palavra, char ** dicionario, int size_dicionario, int max_diferencas);
 
+/* Nome: corrige_linha
+   Input: linha: linha original a ser corrigida
+          dictionary: array de strings (dicionário)
+          dict_size: número de palavras no dicionário
+          max_diff: número máximo de diferenças permitidas
+   Output: ponteiro para a linha corrigida (deve ser libertado pelo chamador)
+   Description: Corrige automaticamente uma linha substituindo palavras erradas
+                pela primeira sugestão disponível no dicionário.
+*/
+char* corrige_linha(char* linha, char** dictionary, int dict_size, int max_diff);
+
 #endif

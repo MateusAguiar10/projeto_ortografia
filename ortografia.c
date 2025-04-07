@@ -113,169 +113,11 @@ void processa_linhas(char ** lines, int nr_linhas, char ** dictionary, int dict_
         }
 
         if (mode == 3) {
-            char *linha_corrigida = NULL;
-            size_t size_linha_corrigida = 0;
-            /* Inicializa a linha corrigida */
-            linha_corrigida = malloc(1);
-            if (linha_corrigida == NULL) { 
-                fprintf(stderr, "Erro ao alocar memória\n"); 
-                exit(1); 
-            }
-            linha_corrigida[0] = '\0';
-            size_linha_corrigida = 0;
-            
-            char *ptr = linha;
-            while (*ptr != '\0') {
-                /* Se o caractere atual for um delimitador, copia-o para a saída */
-                if (strchr(delimitadores, *ptr) != NULL) {
-                    { 
-                        char *temp = realloc(linha_corrigida, size_linha_corrigida + 2);
-                        if (temp == NULL) {
-                            fprintf(stderr, "Erro ao realocar memória\n");
-                            exit(1);
-                        }
-                        linha_corrigida = temp;
-                    }
-                    linha_corrigida[size_linha_corrigida] = *ptr;
-                    size_linha_corrigida++;
-                    linha_corrigida[size_linha_corrigida] = '\0';
-                    ptr++;
-                } else {
-                    // Extrai o token (palavra)
-                    size_t token_len = strcspn(ptr, delimitadores);
-                    char *token = malloc(token_len + 1);
-                    if (token == NULL) {
-                        fprintf(stderr, "Erro ao alocar memória para token\n");
-                        exit(1);
-                    }
-                    strncpy(token, ptr, token_len);
-                    token[token_len] = '\0';
-
-                    /*Para lidar com apostrofos no inicio e no final é preciso esta logica toda para nao cortar palavras como can't ao meio*/
-                    int count_apostrofo_inicio = 0;
-                    while (count_apostrofo_inicio < token_len && token[count_apostrofo_inicio] == '\'') {
-                        count_apostrofo_inicio++;
-                    }
-
-                    int count_apostrofo_final = 0;
-                    while (count_apostrofo_final < token_len && token[token_len - 1 - count_apostrofo_final] == '\'') {
-                        count_apostrofo_final++;
-                    }
-
-                    if (count_apostrofo_inicio == token_len) {
-                        char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
-                        if (temp == NULL) {
-                            fprintf(stderr, "Erro ao realocar memória\n");
-                            exit(1);
-                        }
-                        linha_corrigida = temp;
-                        strncat(linha_corrigida, token, token_len);
-                        size_linha_corrigida += token_len;
-                        free(token);
-                        ptr += token_len;
-                        continue;
-                    }
-
-                    // Cria uma palavra sem os apóstrofos para a pesquisa
-                    size_t new_length = token_len - count_apostrofo_inicio - count_apostrofo_final;
-                    char *clean_token = malloc(new_length + 1);
-                    if (clean_token == NULL) {
-                        fprintf(stderr, "Erro ao alocar memória para clean_token\n");
-                        exit(1);
-                    }
-                    if (new_length > 0) {
-                        strncpy(clean_token, token + count_apostrofo_inicio, new_length);
-                    }
-                    clean_token[new_length] = '\0';
-
-
-                    if (somente_numero(clean_token)) {
-                        /* Se for um numero apenas adiciona o numero */
-                        { 
-                            char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
-                            if (temp == NULL) {
-                                fprintf(stderr, "Erro ao realocar memória\n");
-                                exit(1);
-                            }
-                            linha_corrigida = temp;
-                        }
-                        strncat(linha_corrigida, token, token_len);
-                        size_linha_corrigida += token_len;
-                    } else {
-                        void *res = bsearch(&clean_token, dictionary, dict_size, sizeof(char*), comparacao_helper);
-                        if (res == NULL) {
-                            char *sugestao = primeira_sugestao(clean_token, dictionary, dict_size, max_diff);
-                            if (sugestao != NULL) {
-                                for (int k = 0; k < count_apostrofo_inicio; k++) { //adiciona os apostrofos no final
-                                    char *temp = realloc(linha_corrigida, size_linha_corrigida + 2);
-                                    if (temp == NULL) {
-                                        fprintf(stderr, "Erro ao realocar memória\n");
-                                        exit(1);
-                                    }
-                                    linha_corrigida = temp;
-                                    linha_corrigida[size_linha_corrigida] = '\'';
-                                    size_linha_corrigida++;
-                                    linha_corrigida[size_linha_corrigida] = '\0';
-                                }
-                                size_t sug_len = strlen(sugestao);
-                                { 
-                                    char *temp = realloc(linha_corrigida, size_linha_corrigida + sug_len + 1);
-                                    if (temp == NULL) {
-                                        fprintf(stderr, "Erro ao realocar memória\n");
-                                        exit(1);
-                                    }
-                                    linha_corrigida = temp;
-                                }
-                                strcat(linha_corrigida, sugestao); /* adiciona a palavra entre os apostrofos */
-                                size_linha_corrigida += sug_len;
-                                for (int k = 0; k < count_apostrofo_final; k++) {
-                                    char *temp = realloc(linha_corrigida, size_linha_corrigida + 2);
-                                    if (temp == NULL) {
-                                        fprintf(stderr, "Erro ao realocar memória\n");
-                                        exit(1);
-                                    }
-                                    linha_corrigida = temp;
-                                    linha_corrigida[size_linha_corrigida] = '\'';
-                                    size_linha_corrigida++;
-                                    linha_corrigida[size_linha_corrigida] = '\0';
-                                }
-                                free(sugestao);
-                            } else {
-                                /* se nao for encontrada uma sugestao no dicionario vai a original */
-                                { 
-                                    char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
-                                    if (temp == NULL) {
-                                        fprintf(stderr, "Erro ao realocar memória\n");
-                                        exit(1);
-                                    }
-                                    linha_corrigida = temp;
-                                }
-                                strncat(linha_corrigida, token, token_len);
-                                size_linha_corrigida += token_len;
-                            }
-                        } else {
-                            /* se a palavra estiver certa (no dicionario) vai a original, que ja ha de ter os apostrofos todos por isso nao é preciso lidar com isso */
-                            { 
-                                char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
-                                if (temp == NULL) {
-                                    fprintf(stderr, "Erro ao realocar memória\n");
-                                    exit(1);
-                                }
-                                linha_corrigida = temp;
-                            }
-                            strncat(linha_corrigida, token, token_len);
-                            size_linha_corrigida += token_len;
-                        }
-                    }
-                    free(token);
-                    free(clean_token);
-                    ptr += token_len;
-                }
-            }
+            char *linha_corrigida = corrige_linha(linha, dictionary, dict_size, max_diff);
             fprintf(output, "%s\n", linha_corrigida);
             free(linha_corrigida);
             free(linha);
-            continue;
+            continue; /* Se o modo for 3, corrige a linha e passa para a próxima antes de chegar ao funcionamento de outros modos */
         }
 
         char * pch = strtok(linha, delimitadores); /* Divide a linha pelos delimitadores definidos */
@@ -479,4 +321,177 @@ char * primeira_sugestao(char *palavra, char **dicionario, int size_dicionario, 
     }
     
     return NULL;
+}
+
+/* Nome: corrige_linha
+   Input: linha: linha original a ser corrigida
+          dictionary: array de strings (dicionário)
+          dict_size: número de palavras no dicionário
+          max_diff: número máximo de diferenças permitidas
+   Output: ponteiro para a linha corrigida (deve ser libertado pelo chamador)
+   Description: Corrige automaticamente uma linha substituindo palavras erradas
+                pela primeira sugestão disponível no dicionário.
+*/
+char* corrige_linha(char* linha, char** dictionary, int dict_size, int max_diff) {
+    char * delimitadores = " #*$\t\n/.,;:!?\"-()[]{}\\|<>~`@^&%+=_";
+    char *linha_corrigida = NULL;
+    size_t size_linha_corrigida = 0;
+    
+    /* Inicializa a linha corrigida */
+    linha_corrigida = malloc(1);
+    if (linha_corrigida == NULL) { 
+        fprintf(stderr, "Erro ao alocar memória\n"); 
+        exit(1); 
+    }
+    linha_corrigida[0] = '\0';
+    size_linha_corrigida = 0;
+    
+    char *ptr = linha;
+    while (*ptr != '\0') {
+        /* Se o caractere atual for um delimitador, copia-o para a saída */
+        if (strchr(delimitadores, *ptr) != NULL) {
+            { 
+                char *temp = realloc(linha_corrigida, size_linha_corrigida + 2);
+                if (temp == NULL) {
+                    fprintf(stderr, "Erro ao realocar memória\n");
+                    exit(1);
+                }
+                linha_corrigida = temp;
+            }
+            linha_corrigida[size_linha_corrigida] = *ptr;
+            size_linha_corrigida++;
+            linha_corrigida[size_linha_corrigida] = '\0';
+            ptr++;
+        } else {
+            // Extrai o token (palavra)
+            size_t token_len = strcspn(ptr, delimitadores);
+            char *token = malloc(token_len + 1);
+            if (token == NULL) {
+                fprintf(stderr, "Erro ao alocar memória para token\n");
+                exit(1);
+            }
+            strncpy(token, ptr, token_len);
+            token[token_len] = '\0';
+
+            /*Para lidar com apostrofos no inicio e no final é preciso esta logica toda para nao cortar palavras como can't ao meio*/
+            int count_apostrofo_inicio = 0;
+            while (count_apostrofo_inicio < token_len && token[count_apostrofo_inicio] == '\'') {
+                count_apostrofo_inicio++;
+            }
+
+            int count_apostrofo_final = 0;
+            while (count_apostrofo_final < token_len && token[token_len - 1 - count_apostrofo_final] == '\'') {
+                count_apostrofo_final++;
+            }
+
+            if (count_apostrofo_inicio == token_len) {
+                char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
+                if (temp == NULL) {
+                    fprintf(stderr, "Erro ao realocar memória\n");
+                    exit(1);
+                }
+                linha_corrigida = temp;
+                strncat(linha_corrigida, token, token_len);
+                size_linha_corrigida += token_len;
+                free(token);
+                ptr += token_len;
+                continue;
+            }
+
+            // Cria uma palavra sem os apóstrofos para a pesquisa
+            size_t new_length = token_len - count_apostrofo_inicio - count_apostrofo_final;
+            char *clean_token = malloc(new_length + 1);
+            if (clean_token == NULL) {
+                fprintf(stderr, "Erro ao alocar memória para clean_token\n");
+                exit(1);
+            }
+            if (new_length > 0) {
+                strncpy(clean_token, token + count_apostrofo_inicio, new_length);
+            }
+            clean_token[new_length] = '\0';
+
+            if (somente_numero(clean_token)) {
+                /* Se for um numero apenas adiciona o numero */
+                { 
+                    char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
+                    if (temp == NULL) {
+                        fprintf(stderr, "Erro ao realocar memória\n");
+                        exit(1);
+                    }
+                    linha_corrigida = temp;
+                }
+                strncat(linha_corrigida, token, token_len);
+                size_linha_corrigida += token_len;
+            } else {
+                void *res = bsearch(&clean_token, dictionary, dict_size, sizeof(char*), comparacao_helper);
+                if (res == NULL) {
+                    char *sugestao = primeira_sugestao(clean_token, dictionary, dict_size, max_diff);
+                    if (sugestao != NULL) {
+                        for (int k = 0; k < count_apostrofo_inicio; k++) { //adiciona os apostrofos no final
+                            char *temp = realloc(linha_corrigida, size_linha_corrigida + 2);
+                            if (temp == NULL) {
+                                fprintf(stderr, "Erro ao realocar memória\n");
+                                exit(1);
+                            }
+                            linha_corrigida = temp;
+                            linha_corrigida[size_linha_corrigida] = '\'';
+                            size_linha_corrigida++;
+                            linha_corrigida[size_linha_corrigida] = '\0';
+                        }
+                        size_t sug_len = strlen(sugestao);
+                        { 
+                            char *temp = realloc(linha_corrigida, size_linha_corrigida + sug_len + 1);
+                            if (temp == NULL) {
+                                fprintf(stderr, "Erro ao realocar memória\n");
+                                exit(1);
+                            }
+                            linha_corrigida = temp;
+                        }
+                        strcat(linha_corrigida, sugestao); /* adiciona a palavra entre os apostrofos */
+                        size_linha_corrigida += sug_len;
+                        for (int k = 0; k < count_apostrofo_final; k++) {
+                            char *temp = realloc(linha_corrigida, size_linha_corrigida + 2);
+                            if (temp == NULL) {
+                                fprintf(stderr, "Erro ao realocar memória\n");
+                                exit(1);
+                            }
+                            linha_corrigida = temp;
+                            linha_corrigida[size_linha_corrigida] = '\'';
+                            size_linha_corrigida++;
+                            linha_corrigida[size_linha_corrigida] = '\0';
+                        }
+                        free(sugestao);
+                    } else {
+                        /* se nao for encontrada uma sugestao no dicionario vai a original */
+                        { 
+                            char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
+                            if (temp == NULL) {
+                                fprintf(stderr, "Erro ao realocar memória\n");
+                                exit(1);
+                            }
+                            linha_corrigida = temp;
+                        }
+                        strncat(linha_corrigida, token, token_len);
+                        size_linha_corrigida += token_len;
+                    }
+                } else {
+                    /* se a palavra estiver certa (no dicionario) vai a original, que ja ha de ter os apostrofos todos por isso nao é preciso lidar com isso */
+                    { 
+                        char *temp = realloc(linha_corrigida, size_linha_corrigida + token_len + 1);
+                        if (temp == NULL) {
+                            fprintf(stderr, "Erro ao realocar memória\n");
+                            exit(1);
+                        }
+                        linha_corrigida = temp;
+                    }
+                    strncat(linha_corrigida, token, token_len);
+                    size_linha_corrigida += token_len;
+                }
+            }
+            free(token);
+            free(clean_token);
+            ptr += token_len;
+        }
+    }
+    return linha_corrigida;
 }

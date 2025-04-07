@@ -19,7 +19,10 @@
 #define DICT_PATH "words"
 
 
-// Função para imprimir a ajuda do programa
+/*Nome: print_help 
+  Description: 
+                - Imprime a ajuda do programa, incluindo informações sobre as opções disponíveis.
+*/
 void print_help() {
     printf("Ortografia: Verificador ortográfico\n");
     printf("Este programa verifica a ortografia de um texto, sugerindo correções para palavras incorretas.\n\n\n\n");
@@ -33,7 +36,13 @@ void print_help() {
 }
 
 
-// Função para verificar se uma string é um número válido
+/*Nome: is_valid_number
+  Input: str: string a verificar
+  Output: int que indica se a string é numérica (1) ou não (0)
+  Description: 
+                - Verifica se a string contém apenas dígitos.
+                - Retorna 1 se a string for numérica, 0 caso contrário.
+*/
 int is_valid_number(const char *str) {
     if (str == NULL || *str == '\0') {
         return 0;  // String vazia ou NULL não é um número válido
